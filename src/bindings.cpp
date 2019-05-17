@@ -14,10 +14,12 @@
 #ifdef __AVX2__
 
 #include "php.h"
+#include "php_simdjson.h"
+
 #include "simdjson.h"
 #include "bindings.h"
 
-static bool simdjsonphp::isvalid(std::string_view p) /* {{{ */ {
+static bool simdjsonphp::isvalid(std::string p) /* {{{ */ {
     ParsedJson pj = build_parsed_json(p);
     return pj.isValid();
 }
@@ -30,8 +32,8 @@ bool cplus_isvalid(const char *json) /* {{{ */ {
 
 /* }}} */
 
-static void simdjsonphp::parse(std::string_view p, zval *return_value, u_short assoc) /* {{{ */ {
-    ParsedJson pj = build_parsed_json(p);
+static void simdjsonphp::parse(std::string p, zval *return_value, unsigned char assoc, u_short depth) /* {{{ */ {
+    ParsedJson pj = build_parsed_json(p, depth);
     if (!pj.isValid()) {
         return;
     }
@@ -45,8 +47,8 @@ static void simdjsonphp::parse(std::string_view p, zval *return_value, u_short a
 
 /* }}} */
 
-void cplus_parse(const char *json, zval *return_value, u_short assoc) /* {{{ */ {
-    simdjsonphp::parse(json, return_value, assoc);
+void cplus_parse(const char *json, zval *return_value, unsigned char assoc, u_short depth) /* {{{ */ {
+    simdjsonphp::parse(json, return_value, assoc, depth);
 }
 
 /* }}} */
@@ -170,6 +172,102 @@ static zval simdjsonphp::make_object(ParsedJson::iterator &pjh) /* {{{ */ {
     }
     return v;
 }
+
+/* }}} */
+
+
+
+static bool cplus_find_node(const char *json, const char *key, ParsedJson::iterator &pjh) /* {{{ */ {
+
+    char *pkey = estrdup(key);
+    char const *seps = "\t";
+    char *token = strtok(pkey, seps);
+    bool found = false;
+
+    while (token != NULL) {
+        found = false;
+        switch (pjh.get_type()) {
+            case SIMDJSON_NODE_TYPE_ARRAY :
+                if (pjh.down()) {
+                    int n = 0, index = 0;
+                    try {
+                        index = std::stoul(token);
+                    } catch (...) {
+                        break;
+                    }
+                    do {
+                        if (n == index) {
+                            found = true;
+                            break;
+                        }
+                        n++;
+                    } while (pjh.next());
+                }
+                break;
+            case SIMDJSON_NODE_TYPE_OBJECT :
+                if (pjh.down()) {
+                    do {
+                        if (strcmp(pjh.get_string(), token) == 0) {
+                            found = true;
+                            pjh.next();
+                            break;
+                        }
+                        pjh.next();
+                    } while (pjh.next());
+                }
+                break;
+        }
+        if (!found) {
+            break;
+        }
+        token = strtok(NULL, seps);
+    }
+    efree(pkey);
+    if (found) {
+        return true;
+    }
+    return false;
+}
+
+/* }}} */
+
+void cplus_fastget(const char *json, const char *key, zval *return_value, unsigned char assoc) /* {{{ */ {
+
+    ParsedJson pj = build_parsed_json(json);
+    if (!pj.isValid()) {
+        return;
+    }
+
+    ParsedJson::iterator pjh(pj);
+    bool is_found = cplus_find_node(json, key, pjh);
+
+    if(!is_found) {
+        return;
+    }
+
+    if (assoc) {
+        *return_value = simdjsonphp::make_array(pjh);
+    } else {
+        *return_value = simdjsonphp::make_object(pjh);
+    }
+}
+
+/* }}} */
+
+u_short cplus_key_exists(const char *json, const char *key) /* {{{ */ {
+
+    ParsedJson pj = build_parsed_json(json);
+    if (!pj.isValid()) {
+        return SIMDJSON_PARSE_FAIL;
+    }
+    ParsedJson::iterator pjh(pj);
+    bool is_found = cplus_find_node(json, key, pjh);
+    if (is_found) {
+        return SIMDJSON_PARSE_KEY_EXISTS;
+    }
+    return SIMDJSON_PARSE_KEY_NOEXISTS;
+}
+
 /* }}} */
 
 #endif

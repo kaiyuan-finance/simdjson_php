@@ -31,10 +31,27 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO(simdjson_decode, 1)
         ZEND_ARG_INFO(0, json)
         ZEND_ARG_INFO(0, assoc)
+        ZEND_ARG_INFO(0, depth)
 ZEND_END_ARG_INFO()
 
-extern int cplus_isvalid(const char *json);
-extern int cplus_parse(const char *json, zval *return_value, u_short assoc);
+ZEND_BEGIN_ARG_INFO(simdjson_fastget, 2)
+        ZEND_ARG_INFO(0, json)
+        ZEND_ARG_INFO(0, key)
+        ZEND_ARG_INFO(0, assoc)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(simdjson_key_exists, 2)
+        ZEND_ARG_INFO(0, json)
+        ZEND_ARG_INFO(0, key)
+ZEND_END_ARG_INFO()
+
+extern unsigned char cplus_isvalid(const char *json);
+
+extern void cplus_parse(const char *json, zval *return_value, unsigned char assoc, u_short depth);
+
+extern void cplus_fastget(const char *json, const char *key, zval *return_value, unsigned char assoc);
+
+extern u_short cplus_key_exists(const char *json, const char *key);
 
 PHP_FUNCTION (simdjson_isvalid) {
     zend_string *version = NULL;
@@ -47,11 +64,36 @@ PHP_FUNCTION (simdjson_isvalid) {
 
 PHP_FUNCTION (simdjson_decode) {
     zend_bool assoc = 0;
-    zend_string *version = NULL;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S|b", &version, &assoc) == FAILURE) {
+    zend_long depth = 512;
+    zend_string *json = NULL;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S|bl", &json, &assoc, &depth) == FAILURE) {
         return;
     }
-    cplus_parse(ZSTR_VAL(version), return_value, assoc);
+    cplus_parse(ZSTR_VAL(json), return_value, assoc, depth + 1);
+}
+
+PHP_FUNCTION (simdjson_fastget) {
+    zend_bool assoc = 0;
+    zend_string *json = NULL, *key = NULL;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|b", &json, &key, &assoc) == FAILURE) {
+        return;
+    }
+    cplus_fastget(ZSTR_VAL(json), ZSTR_VAL(key), return_value, assoc);
+}
+
+PHP_FUNCTION (simdjson_key_exists) {
+    zend_string *json = NULL, *key = NULL;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS", &json, &key) == FAILURE) {
+        return;
+    }
+    u_short is_exists = cplus_key_exists(ZSTR_VAL(json), ZSTR_VAL(key));
+    if (SIMDJSON_PARSE_FAIL == is_exists) {
+        RETURN_NULL();
+    } else if (SIMDJSON_PARSE_KEY_EXISTS == is_exists) {
+        RETURN_TRUE;
+    } else if (SIMDJSON_PARSE_KEY_NOEXISTS == is_exists) {
+        RETURN_FALSE;
+    }
 }
 
 /* {{{ simdjson_functions[]
@@ -59,6 +101,8 @@ PHP_FUNCTION (simdjson_decode) {
 zend_function_entry simdjson_functions[] = {
     PHP_FE(simdjson_isvalid, simdjson_isvalid)
     PHP_FE(simdjson_decode, simdjson_decode)
+    PHP_FE(simdjson_fastget, simdjson_fastget)
+    PHP_FE(simdjson_key_exists, simdjson_key_exists)
     {NULL, NULL, NULL}
 };
 /* }}} */
